@@ -1,12 +1,14 @@
 #include "ArduinoJson.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <WebServer.h>
 
-#define LED_PIN 18
+#define LED_PIN 32 // set LED pin
 
-const char *ssid = "guest";
-const char *password = "Guest42guest";
+const char *ssid = "Nunnaphut's"; // your wifi ssid guest
+const char *password = "12345678"; // your wifi password Guest42guest
 
+// MQTT Server spec
 const char *mqttServer = "188.166.191.227";
 const int mqttPort = 1883;
 const char *mqttUser = "HW_MQTT_01";
@@ -14,6 +16,30 @@ const char *mqttPassword = "hw_mqtt_beonit";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+WebServer server(80);
+
+void handleRoot() {
+  String ledState = digitalRead(LED_PIN) ? "checked" : "";
+  String page = "<h1>ESP32 LED Control</h1>";
+  page += "<label for='brightness'>Brightness (0-10):</label>";
+  page += "<input type='range' id='brightness' name='brightness' min='0' max='10' value='0'";
+  page += "onchange='setBrightness(this.value)'><br>";
+  page += "<script>";
+  page += "function setBrightness(value) {";
+  page += "var xhr = new XMLHttpRequest();";
+  page += "xhr.open('POST', '/led', true);";
+  page += "xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');";
+  page += "xhr.send('brightness=' + encodeURIComponent(value));";
+  page += "}";
+  page += "</script>";
+  server.send(200, "text/html", page);
+}
+
+void handleLED() {
+  int brightness = server.arg("brightness").toInt();
+  brightness = constrain(brightness, 0, 10); // brightness 0 to 10
+  analogWrite(LED_PIN, map(brightness, 0, 10, 0, 255)); // convert 0 - 255 to 0 - 10
+}
 
 void setup(void)
 {
@@ -24,7 +50,7 @@ void setup(void)
     Serial.print(".");
   }
 
-  Serial.println("");
+  Serial.println();
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
@@ -32,9 +58,12 @@ void setup(void)
   Serial.println("Connected to the WiFi network");
 
   client.setServer(mqttServer, mqttPort);
-  client.setCallback(callback);
 
   pinMode(LED_PIN, OUTPUT);
+  analogWrite(LED_PIN, 0);
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/led", HTTP_POST, handleLED);
+  server.begin();
 }
 
 void loop(void)
@@ -43,7 +72,7 @@ void loop(void)
   {
       Serial.println("Connecting to MQTT...");
   
-      if (client.connect("new client", mqttUser, mqttPassword ))
+      if (client.connect("Nunnaphut", mqttUser, mqttPassword))
       {
         Serial.println("Connected");
       }
@@ -58,15 +87,11 @@ void loop(void)
   StaticJsonBuffer<300> JSONbuffer;
   JsonObject& JSONencoder = JSONbuffer.createObject();
 
-  JSONencoder["status"] = analogRead(LED_PIN) > 0 ? "ON" : "OFF";
-  JSONencoder["brightness"] = (int)(analogRead(LED_PIN) / 25.5);
+  JSONencoder["status"] = digitalRead(LED_PIN) > 0 ? "ON" : "OFF";
+  JSONencoder["brightness"] = server.arg("brightness").toInt();
   // JSONencoder["duration"] = "DO SOMETHING" (if timestamp function --> check if minutes of hour is 0, 15, 45)
   // JSONencoder["Esp32Time"] = "SEND TIMESTAMP";
-  // JsonArray values = JSONencoder.createNestedArray("values");
-  
-  // values.add(20);
-  // values.add(21);
-  // values.add(23);
+
 
   char JSONmessageBuffer[100];
   JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
@@ -78,6 +103,7 @@ void loop(void)
   } else {
       Serial.println("Error sending message");
   }
-  
   client.loop();
+  server.handleClient();
+  delay(5000);
 }
