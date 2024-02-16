@@ -96,20 +96,40 @@ void loop(void)
   }
 
   timeClient.update();
-  
   unsigned long elapsedTime = (millis() - startTime) / 1000;
-  int elapsedMinutes = elapsedTime / 60; // second
-
+  // int elapsedMinutes = elapsedTime / 60; // minute
   delay(1000);
+  Serial.println(elapsedTime);
 
-  if ((elapsedMinutes % 30 == 15 || elapsedMinutes % 30 == 45) && elapsedMinutes > 0)
+  if (elapsedTime % (60 * 60) == 0)
   {
     StaticJsonBuffer<300> JSONbuffer;
     JsonObject& JSONencoder = JSONbuffer.createObject();
 
     JSONencoder["status"] = server.arg("brightness").toInt() > 0 ? "ON" : "OFF";
     JSONencoder["brightness"] = server.arg("brightness").toInt();
-    JSONencoder["duration"] = (int)(elapsedMinutes / 60);
+    JSONencoder["duration"] = (int)(elapsedTime / 60);
+    JSONencoder["Esp32Time"] = timeClient.getFormattedTime();
+
+    char JSONmessageBuffer[100];
+    JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+
+    Serial.println(JSONmessageBuffer);
+   
+    if (client.publish("HW_mqtt/testing/01", JSONmessageBuffer) == true) {
+        Serial.println("Success sending message");
+    } else {
+        Serial.println("Error sending message");
+    }
+  }
+  else if (elapsedTime % (30 * 60) == 1 * 60) // (elapsedTime % (60 * 60) == 15)
+  {
+    StaticJsonBuffer<300> JSONbuffer;
+    JsonObject& JSONencoder = JSONbuffer.createObject();
+
+    JSONencoder["status"] = server.arg("brightness").toInt() > 0 ? "ON" : "OFF";
+    JSONencoder["brightness"] = server.arg("brightness").toInt();
+    JSONencoder["duration"] = (int)(elapsedTime / 60);
     JSONencoder["Esp32Time"] = timeClient.getFormattedTime();
 
     char JSONmessageBuffer[100];
