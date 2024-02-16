@@ -2,11 +2,13 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <WebServer.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 #define LED_PIN 32 // set LED pin
 
-const char *ssid = "Nunnaphut's"; // your wifi ssid guest
-const char *password = "12345678"; // your wifi password Guest42guest
+const char *ssid = "Nunnaphut's"; // your wifi ssid
+const char *password = "12345678"; // your wifi password
 
 // MQTT Server spec
 const char *mqttServer = "188.166.191.227";
@@ -17,6 +19,12 @@ const char *mqttPassword = "hw_mqtt_beonit";
 WiFiClient espClient;
 PubSubClient client(espClient);
 WebServer server(80);
+
+const long utcOffsetInSeconds = 25200; // ค่า offset ของเขตเวลา GMT+7 (เวลาไทย)
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
+
+
 
 void handleRoot() {
   String ledState = digitalRead(LED_PIN) ? "checked" : "";
@@ -41,6 +49,8 @@ void handleLED() {
   analogWrite(LED_PIN, map(brightness, 0, 10, 0, 255)); // convert 0 - 255 to 0 - 10
 }
 
+unsigned long startTime = 0;
+
 void setup(void)
 {
   Serial.begin(115200);
@@ -60,12 +70,13 @@ void setup(void)
   client.setServer(mqttServer, mqttPort);
 
   pinMode(LED_PIN, OUTPUT);
-  analogWrite(LED_PIN, 0);
   server.on("/", HTTP_GET, handleRoot);
   server.on("/led", HTTP_POST, handleLED);
   server.begin();
-}
 
+  timeClient.begin();
+  startTime = millis();
+}
 void loop(void)
 {
   if (!client.connected())
@@ -84,26 +95,34 @@ void loop(void)
       }
   }
 
-  StaticJsonBuffer<300> JSONbuffer;
-  JsonObject& JSONencoder = JSONbuffer.createObject();
+  timeClient.update();
+  
+  unsigned long elapsedTime = (millis() - startTime) / 1000;
+  int elapsedMinutes = elapsedTime / 60; // second
 
-  JSONencoder["status"] = digitalRead(LED_PIN) > 0 ? "ON" : "OFF";
-  JSONencoder["brightness"] = server.arg("brightness").toInt();
-  // JSONencoder["duration"] = "DO SOMETHING" (if timestamp function --> check if minutes of hour is 0, 15, 45)
-  // JSONencoder["Esp32Time"] = "SEND TIMESTAMP";
+  delay(1000);
 
+  if ((elapsedMinutes % 30 == 15 || elapsedMinutes % 30 == 45) && elapsedMinutes > 0)
+  {
+    StaticJsonBuffer<300> JSONbuffer;
+    JsonObject& JSONencoder = JSONbuffer.createObject();
 
-  char JSONmessageBuffer[100];
-  JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+    JSONencoder["status"] = server.arg("brightness").toInt() > 0 ? "ON" : "OFF";
+    JSONencoder["brightness"] = server.arg("brightness").toInt();
+    JSONencoder["duration"] = (int)(elapsedMinutes / 60);
+    JSONencoder["Esp32Time"] = timeClient.getFormattedTime();
 
-  Serial.println(JSONmessageBuffer);
- 
-  if (client.publish("HW_mqtt/testing/01", JSONmessageBuffer) == true) {
-      Serial.println("Success sending message");
-  } else {
-      Serial.println("Error sending message");
+    char JSONmessageBuffer[100];
+    JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+
+    Serial.println(JSONmessageBuffer);
+   
+    if (client.publish("HW_mqtt/testing/01", JSONmessageBuffer) == true) {
+        Serial.println("Success sending message");
+    } else {
+        Serial.println("Error sending message");
+    }
   }
   client.loop();
   server.handleClient();
-  delay(5000);
 }
